@@ -54,13 +54,104 @@ void write_png(const char* filename, int iters, int width, int height, const int
     fclose(fp);
 }
 
+int monitor(int *collector){
+
+    return ;
+}
+
+void distribute(int rank, int size, int *comm_size_p, int *collector, int height, int *start, int *end){
+    if(size >= height){
+        (*comm_size_p) = height;
+        (*collector) = height - 1;
+        if(rank < height){
+            (*start) = rank + 1;
+            (*end) = rank + 1;
+        }
+    }
+    eles{
+        int comm_size = size;
+        (*comm_size_p) = comm_size;
+        (*collector) = comm_size - 1;
+
+        int remain = height % comm_size;
+        int shorter_segment = height / comm_size;
+        int longer_segment = height / comm_size + 1;
+        int segment = rank < remain? longer_segment : shorter_segment;
+        (*start) = rank <= remain? longer_segment * rank : longer_segment * remain + shorter_segment * (rank - remain);
+        (*end) = (*start) + segment - 1;
+    }
+}
+
+void proc_task(int rank, int size, int *image, int height, double upper, double lower, int width, double right, double left, int iters){
+    int start = -1;
+    int end = -1;
+    int comm_size = -1;
+    int collector = -1;
+    distribute(rank, size, &comm_size, &collector, height, &start, &end);
+
+}
+
+void compute(){
+
+}
+
 int main(int argc, char *argv[]){
+    // const char* filename = argv[4];
+    // int iters = strtol(argv[5], 0, 10);
+    // double left = strtod(argv[6], 0);
+    // double right = strtod(argv[7], 0);
+    // double lower = strtod(argv[8], 0);
+    // double upper = strtod(argv[9], 0);
+    // int width = strtol(argv[10], 0, 10);
+    // int height = strtol(argv[11], 0, 10);
+
+    const char* filename = NULL;
+    int iters = -1;
+    double left = -1.0;
+    double right = -1.0;
+    double lower = -1.0;
+    double upper = -1.0;
+    int width = -1;
+    int height = -1;
+    if(argc == 9){
+        filename = argv[1];
+        iters = strtol(argv[2], 0, 10);
+        left = strtod(argv[3], 0);
+        right = strtod(argv[4], 0);
+        lower = strtod(argv[5], 0);
+        upper = strtod(argv[6], 0);
+        width = strtol(argv[7], 0, 10);
+        height = strtol(argv[8], 0, 10);
+    }else if(argc == 12){
+        filename = argv[4];
+        iters = strtol(argv[5], 0, 10);
+        left = strtod(argv[6], 0);
+        right = strtod(argv[7], 0);
+        lower = strtod(argv[8], 0);
+        upper = strtod(argv[9], 0);
+        width = strtol(argv[10], 0, 10);
+        height = strtol(argv[11], 0, 10);
+    }
+
     int rank = -1, size = -1;
+
+    int* image = NULL;
+    assert(image);
+
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+    // comm_size = size;
+    if(rank == 0){
+        image = (int*)malloc(width * height * sizeof(int));
+        assert(image);
+    }
 
     printf("Hi, Here is rank %d\n", rank);
 
+    if(rank == 0){
+        write_png(filename, iters, width, height, image);
+        free(image);
+    }
     MPI_Finalize();
 }
