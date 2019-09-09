@@ -18,6 +18,7 @@ typedef enum{
 }bool;
 
 void write_png(const char* filename, int iters, int width, int height, const int* buffer) {
+    // printf("write_png 0\n");
     FILE* fp = fopen(filename, "wb");
     assert(fp);
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -45,6 +46,7 @@ void write_png(const char* filename, int iters, int width, int height, const int
                     color[0] = p % 16 * 16;
                 }
             }
+            // printf("Image H%d w%d\n", y, x);
         }
         png_write_row(png_ptr, row);
     }
@@ -59,16 +61,17 @@ int monitor(int *collector){
     return ;
 }
 
-void distribute(int rank, int size, int *comm_size_p, int *collector, int height, int *start, int *end){
+void distribute(int rank, int size, int *comm_size_p, int *collector, int height, int width, int *start, int *end, int *mem_segment_len){
     if(size >= height){
         (*comm_size_p) = height;
         (*collector) = height - 1;
         if(rank < height){
-            (*start) = rank + 1;
-            (*end) = rank + 1;
+            (*start) = rank;
+            (*end) = rank;
+            (*mem_segment_len) = width;
         }
     }
-    eles{
+    else{
         int comm_size = size;
         (*comm_size_p) = comm_size;
         (*collector) = comm_size - 1;
@@ -79,20 +82,96 @@ void distribute(int rank, int size, int *comm_size_p, int *collector, int height
         int segment = rank < remain? longer_segment : shorter_segment;
         (*start) = rank <= remain? longer_segment * rank : longer_segment * remain + shorter_segment * (rank - remain);
         (*end) = (*start) + segment - 1;
+        (*mem_segment_len) = segment * width;
+    }
+    printf("Rank %d size %d comm_size %d collector %d start %d end %d\n", rank, size, (*comm_size_p), (*collector), (*start), (*end));
+}
+
+void gather(int rank, int comm_size, int mem_segment_len, int *image, int *buf, int collector){
+    if(rank > 0){
+        printf("Rank %d gather 0\n", rank);
+        int temp_mem_segment_len = mem_segment_len;
+        MPI_Send(&temp_mem_segment_len, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+        printf("Rank %d send temp_mem_segment_len\n", rank);
+        MPI_Send(buf, mem_segment_len, MPI_INT, 0, 1, MPI_COMM_WORLD);
+        printf("Rank %d send buff mem_segment\n", rank);
+        // free(buf);
+    }
+    
+    // for(int i=0; i<mem_segment_len; i++){
+    //     printf("%d ", )
+    // }
+    
+    if(rank == 0){
+        int accum_idx = 0;
+        for(int j=0; j<mem_segment_len; j++){
+            image[accum_idx] = buf[j];
+            // printf("Rank %d image[%d]=temp_buff[%d] < %d\n", i, accum_idx, j, buff_mem_segment_len);
+            accum_idx++;
+        }
+        // free(buf);
+        for(int i = 1; i < comm_size; i++){
+            int buff_mem_segment_len;
+            printf("Rank %d wait for rank %d mem_segment_len\n", rank, i);
+            MPI_Recv(&buff_mem_segment_len, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            int *temp_buf = (int*)malloc(sizeof(int) * buff_mem_segment_len);
+
+            printf("Rank %d wait for rank %d temp_buf\n", rank, i);
+            MPI_Recv(temp_buf, buff_mem_segment_len, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            for(int j=0; j<buff_mem_segment_len; j++){
+                image[accum_idx] = temp_buf[j];
+                // printf("Rank %d image[%d]=temp_buff[%d] < %d\n", i, accum_idx, j, buff_mem_segment_len);
+                accum_idx++;
+            }
+            free(temp_buf);
+        }
+    }
+}
+
+void compute(int rank, int start, int end, int mem_segment_len, int **buf, int height, double upper, double lower, int width, double right, double left, int iters){
+    // int segment_len = end - start + 1;
+    (*buf) = (int*)malloc(sizeof(int) * mem_segment_len);
+    
+    for (int j = start, k = 0; j <= end; ++j, ++k) {
+        double y0 = j * ((upper - lower) / height) + lower;
+        #pragma omp parallel for
+        for (int i = 0; i < width; ++i) {
+            double x0 = i * ((right - left) / width) + left;
+
+            int repeats = 0;
+            double x = 0;
+            double y = 0;
+            double length_squared = 0;
+            while (repeats < iters && length_squared < 4) {
+                double temp = x * x - y * y + x0;
+                y = 2 * x * y + y0;
+                x = temp;
+                length_squared = x * x + y * y;
+                ++repeats;
+            }
+            (*buf)[k * width + i] = repeats;
+            // printf("Rank %d buff_idx %d < %d mem_segment_len\n", rank, k*width+i, mem_segment_len);
+        }
     }
 }
 
 void proc_task(int rank, int size, int *image, int height, double upper, double lower, int width, double right, double left, int iters){
     int start = -1;
     int end = -1;
+    int mem_segment_len = -1;
     int comm_size = -1;
     int collector = -1;
-    distribute(rank, size, &comm_size, &collector, height, &start, &end);
-
-}
-
-void compute(){
-
+    int *buf = NULL;
+    distribute(rank, size, &comm_size, &collector, height, width, &start, &end, &mem_segment_len);
+    printf("Rank %d comm_size %d mem_segment_len  %d colletor %d start %d end %d\n", rank, comm_size, mem_segment_len, collector, start, end);
+    if(start != -1){
+        compute(rank, start, end, mem_segment_len, &buf, height, upper, lower, width, right, left, iters);
+        printf("Rank %d compute End\n", rank);
+        gather(rank, comm_size, mem_segment_len, image, buf, collector);
+        printf("Rank %d gather End\n", rank);
+        // free(buf);
+    }
+    
 }
 
 int main(int argc, char *argv[]){
@@ -134,9 +213,8 @@ int main(int argc, char *argv[]){
     }
 
     int rank = -1, size = -1;
-
+    int *buf = NULL;
     int* image = NULL;
-    assert(image);
 
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -144,10 +222,13 @@ int main(int argc, char *argv[]){
     // comm_size = size;
     if(rank == 0){
         image = (int*)malloc(width * height * sizeof(int));
+        printf("Image size: %d\n", width * height);
         assert(image);
     }
 
     printf("Hi, Here is rank %d\n", rank);
+    proc_task(rank, size, image, height, upper, lower, width, right, left, iters);
+    printf("Rank %d proc_task End\n", rank);
 
     if(rank == 0){
         write_png(filename, iters, width, height, image);
