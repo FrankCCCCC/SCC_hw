@@ -3,6 +3,8 @@
 ## hw2a.c
 > Pthread implementation
 
+Before compile, please install pthread library for C language
+
 Compile: gcc hw2a.c -o hw2a -lpthread
 
 Run: ./hw2a
@@ -10,7 +12,7 @@ Run: ./hw2a
 ## hw2b.c
 > MPI implementation
 
-Please Install Open MPI at first
+Before compile, please install Open MPI
 
 Compile:  mpicc hw2b.c -o hw2b
 
